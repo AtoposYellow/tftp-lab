@@ -1,0 +1,12 @@
+{
+  "tftp_port": 69,
+  "web_port": 8080,
+  "root_dir": "C:\\Users\\Atopos Yellow\\Desktop\\大学\\大二上学期\\计网实验\\tftp-server\\tftp-server\\files",
+  "log_dir": "logs",
+  "log_level": "INFO",
+  "timeout": 0.5,
+  "retries": 15,
+  "max_concurrent": 32,
+  "grace_seconds": 5,
+  "overwrite": true
+}

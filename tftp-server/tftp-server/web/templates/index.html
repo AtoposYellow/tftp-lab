@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TFTP 服务管理台</title>
+<link rel="icon" type="image/png" href="/static/tftp-app-icon.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app">
+  <!-- ======================= 左侧导航 ======================= -->
+  <aside class="sidebar">
+    <div class="brand">
+      <img class="brand-icon" src="/static/tftp-app-icon.png" alt="">
+      <span class="brand-name">TFTP 服务</span>
+    </div>
+
+    <nav class="nav" aria-label="主导航">
+      <button class="nav-item is-active" data-nav="overview" aria-label="概览" aria-current="page">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4.5C3 3.7 3.7 3 4.5 3h4c.8 0 1.5.7 1.5 1.5v4c0 .8-.7 1.5-1.5 1.5h-4C3.7 10 3 9.3 3 8.5v-4zm0 8c0-.8.7-1.5 1.5-1.5h4c.8 0 1.5.7 1.5 1.5v4c0 .8-.7 1.5-1.5 1.5h-4C3.7 17 3 16.3 3 15.5v-3zM11.5 3h4c.8 0 1.5.7 1.5 1.5v4c0 .8-.7 1.5-1.5 1.5h-4c-.8 0-1.5-.7-1.5-1.5v-4c0-.8.7-1.5 1.5-1.5zm0 8h4c.8 0 1.5.7 1.5 1.5v4c0 .8-.7 1.5-1.5 1.5h-4c-.8 0-1.5-.7-1.5-1.5v-4c0-.8.7-1.5 1.5-1.5z" fill="currentColor"/></svg>
+        <span class="nav-label">概览</span>
+      </button>
+      <button class="nav-item" data-nav="transfers" aria-label="传输">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11 2.7c0-.9-1.1-1.3-1.7-.7L5 6.3c-.6.6-.2 1.7.7 1.7h2v6H5.7c-.9 0-1.3 1.1-.7 1.7l4.3 4.3c.6.6 1.7.2 1.7-.7v-2h2.6c.9 0 1.3 1.1.7 1.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -1)"/><path d="M14.5 2.5v6M12 5l2.5-2.5L17 5M5.5 17.5v-6M3 14l2.5 2.5L8 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="nav-label">传输</span>
+      </button>
+      <button class="nav-item" data-nav="files" aria-label="文件与日志">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5c0-1.1.9-2 2-2h3l2 2h6c1.1 0 2 .9 2 2v7c0 1.1-.9 2-2 2h-11c-1.1 0-2-.9-2-2v-9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+        <span class="nav-label">文件与日志</span>
+      </button>
+      <button class="nav-item" data-nav="settings" aria-label="设置">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 12.8a2.8 2.8 0 1 0 0-5.6 2.8 2.8 0 0 0 0 5.6z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16.6 12.2l1.5 1a.6.6 0 0 1 .2.8l-1.5 2.6a.6.6 0 0 1-.8.2l-1.6-.8c-.5.4-1.1.7-1.7.9l-.3 1.8a.6.6 0 0 1-.6.5H9.2a.6.6 0 0 1-.6-.5l-.3-1.8a6 6 0 0 1-1.7-.9l-1.6.8a.6.6 0 0 1-.8-.2l-1.5-2.6a.6.6 0 0 1 .2-.8l1.5-1a6.4 6.4 0 0 1 0-2l-1.5-1a.6.6 0 0 1-.2-.8l1.5-2.6c.2-.3.5-.4.8-.2l1.6.8c.5-.4 1.1-.7 1.7-.9l.3-1.8a.6.6 0 0 1 .6-.5h2.6c.3 0 .5.2.6.5l.3 1.8c.6.2 1.2.5 1.7.9l1.6-.8c.3-.2.6 0 .8.2l1.5 2.6c.1.3 0 .6-.2.8l-1.5 1c.1.7.1 1.3 0 2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        <span class="nav-label">设置</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <span class="dot sm" id="navDot" aria-hidden="true"></span>
+      <span class="nav-label" id="navStatusText">加载中…</span>
+    </div>
+  </aside>
+
+  <!-- ======================= 主区域 ======================= -->
+  <div class="main">
+    <header class="page-header">
+      <div class="page-titles">
+        <h1 id="pageTitle">概览</h1>
+        <p id="pageSub">监控 TFTP 服务运行状态和传输活动</p>
+      </div>
+      <div class="page-actions">
+        <span class="status-pill" id="globalStatus" aria-live="polite">
+          <span class="dot" id="globalDot"></span><span id="globalText">加载中…</span>
+        </span>
+        <button class="btn ghost" id="btnRefreshView" hidden>
+          <svg viewBox="0 0 20 20" aria-hidden="true" class="ic"><path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 2.5v3.4h-3.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          刷新
+        </button>
+      </div>
+    </header>
+
+    <main id="views">
+      <!-- ========== 概览 ========== -->
+      <section class="view" data-view="overview">
+        <div class="card service-card">
+          <div class="svc-main">
+            <span class="svc-dot" id="svcDot" aria-hidden="true"></span>
+            <div class="svc-info">
+              <div class="svc-title">TFTP 服务 <span class="badge" id="svcBadge">…</span></div>
+              <div class="svc-meta">
+                <span id="svcPort">UDP :—</span>
+                <span class="divider"></span>
+                <span id="svcRoot" title="">根目录 —</span>
+              </div>
+            </div>
+            <div class="svc-actions">
+              <button class="btn ghost" data-goto="settings">设置</button>
+              <button class="btn danger" id="btnToggleSvc">停止服务</button>
+            </div>
+          </div>
+          <div class="svc-error hidden" id="svcError"></div>
+        </div>
+
+        <div class="metrics">
+          <div class="card metric">
+            <div class="metric-ic mi-blue">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M4 15.5h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="num" id="mActive">0</div>
+            <div class="label">活动传输</div>
+            <div class="sub" id="mActiveSub">当前正在进行的任务</div>
+          </div>
+          <div class="card metric">
+            <div class="metric-ic mi-cyan">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h8M4 10h12M4 14.5h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </div>
+            <div class="num" id="mTotal">0</div>
+            <div class="label">累计传输</div>
+            <div class="sub">上传与下载任务总数</div>
+          </div>
+          <div class="card metric">
+            <div class="metric-ic mi-green">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 10.5 3.5 3.5 7.5-8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="num" id="mRate">—</div>
+            <div class="label">成功率</div>
+            <div class="sub" id="mRateSub">暂无传输记录</div>
+          </div>
+          <div class="card metric">
+            <div class="metric-ic mi-orange">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10a7 7 0 1 0 14 0 7 7 0 0 0-14 0zM10 6v4l2.8 1.6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="num" id="mBytes">0 B</div>
+            <div class="label">累计流量</div>
+            <div class="sub">上传 + 下载总字节</div>
+          </div>
+        </div>
+
+        <div class="ov-grid">
+          <div class="card">
+            <div class="card-head">
+              <h2>活动传输</h2>
+              <button class="link" data-goto="transfers">查看全部 →</button>
+            </div>
+            <div id="ovActive"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h2>最近活动</h2>
+              <button class="link" data-goto="files">查看全部 →</button>
+            </div>
+            <ul class="recent" id="ovRecent"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 传输 ========== -->
+      <section class="view" data-view="transfers" hidden>
+        <div class="card">
+          <div class="filters" id="transferFilters" role="group" aria-label="传输筛选">
+            <button class="chip is-active" data-filter="all">全部</button>
+            <button class="chip" data-filter="upload">上传</button>
+            <button class="chip" data-filter="download">下载</button>
+            <button class="chip" data-filter="active">进行中</button>
+            <button class="chip" data-filter="success">成功</button>
+            <button class="chip" data-filter="failed">失败</button>
+          </div>
+
+          <div class="tbl-scroll">
+            <table class="tbl" id="transferTable">
+              <thead>
+                <tr>
+                  <th>方向</th>
+                  <th>文件</th>
+                  <th class="hide-md">客户端</th>
+                  <th>进度</th>
+                  <th class="hide-md">速度</th>
+                  <th class="hide-sm">耗时</th>
+                  <th>状态</th>
+                  <th class="th-op"><span class="sr-only">操作</span></th>
+                </tr>
+              </thead>
+              <tbody id="transferBody"></tbody>
+            </table>
+            <div class="empty" id="tfEmpty" hidden>
+              <div class="empty-ic">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M4 15.5h12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <p class="empty-title">暂无传输记录</p>
+              <p class="empty-sub">用 TFTP 客户端发起一次上传或下载吧</p>
+            </div>
+          </div>
+          <p class="table-note">历史记录仅保留最近 30 条；点击行可查看详情</p>
+        </div>
+      </section>
+
+      <!-- ========== 文件与日志 ========== -->
+      <section class="view" data-view="files" hidden>
+        <div class="fl-grid">
+          <div class="card files-card">
+            <div class="card-head">
+              <h2>服务器文件</h2>
+              <div class="head-tools">
+                <label class="search">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m13 13 4 4M15.5 9a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                  <input type="search" id="fileSearch" placeholder="搜索文件…" autocomplete="off">
+                </label>
+                <button class="btn ghost sm" id="btnRefreshFiles">刷新</button>
+              </div>
+            </div>
+            <div class="crumbs" id="fileCrumbs"></div>
+            <div class="file-list" id="fileList"></div>
+            <div class="empty slim" id="filesEmpty" hidden><p>该目录为空</p></div>
+          </div>
+
+          <div class="card logs-card">
+            <div class="card-head">
+              <h2>实时日志</h2>
+              <div class="head-tools">
+                <label class="switch" title="开启后自动滚动到最新日志">
+                  <input type="checkbox" id="logFollowChk" checked>
+                  <span class="switch-ui"></span>
+                  <span class="switch-text">跟随</span>
+                </label>
+                <select class="select sm" id="logFilterSel" aria-label="日志筛选">
+                  <option value="all">全部</option>
+                  <option value="request">请求</option>
+                  <option value="success">成功</option>
+                  <option value="failure">失败</option>
+                  <option value="retransmit">重传</option>
+                  <option value="denied">拒绝</option>
+                  <option value="system">系统</option>
+                </select>
+                <button class="btn ghost sm" id="btnClearLogs">清空</button>
+              </div>
+            </div>
+            <div class="log-timeline" id="logTimeline" tabindex="0" aria-label="日志时间线，可滚动查看"></div>
+            <button class="log-resume hidden" id="logResume">
+              <svg viewBox="0 0 20 20" aria-hidden="true" class="ic"><path d="M10 4v9M6.5 9.5 10 13l3.5-3.5M4 16.5h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              已暂停跟随 · 回到最新
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 设置 ========== -->
+      <section class="view" data-view="settings" hidden>
+        <!-- 服务操作区（页面顶部） -->
+        <div class="card svc-ops">
+          <div class="svc-main">
+            <span class="svc-dot" id="opsDot" aria-hidden="true"></span>
+            <div class="svc-info">
+              <div class="svc-title">服务状态 <span class="badge" id="opsBadge">…</span></div>
+              <div class="svc-meta" id="opsMeta">—</div>
+            </div>
+            <div class="svc-actions">
+              <button class="btn danger-ghost" id="btnRestart">重启服务</button>
+              <button class="btn danger" id="btnStopStart">停止服务</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="set-grid">
+          <form id="settingsForm" novalidate>
+            <div class="card group">
+              <h3>基本设置</h3>
+              <div class="field">
+                <label for="cfgPort">UDP 端口</label>
+                <input id="cfgPort" type="number" min="1" max="65535" required>
+                <p class="help">TFTP 服务监听的 UDP 端口（1–65535），修改后自动重启监听</p>
+              </div>
+              <div class="field">
+                <label for="cfgWebPort">Web TCP 端口</label>
+                <input id="cfgWebPort" type="number" min="1" max="65535" required>
+                <p class="help">管理台访问端口（1–65535），修改保存后需重新启动程序生效</p>
+              </div>
+              <div class="field">
+                <label for="cfgRoot">根目录</label>
+                <div class="input-with-btn">
+                  <input id="cfgRoot" type="text" required>
+                  <button type="button" class="btn ghost sm" id="btnBrowseRoot">浏览…</button>
+                </div>
+                <p class="help">上传文件保存和下载来源所在目录</p>
+              </div>
+            </div>
+
+            <div class="card group">
+              <h3>传输可靠性</h3>
+              <div class="field-row">
+                <div class="field">
+                  <label for="cfgTimeout">超时时间（秒）</label>
+                  <input id="cfgTimeout" type="number" step="0.1" min="0.2" max="30" required>
+                  <p class="help">等待客户端响应的超时时间（0.2–30 秒）</p>
+                </div>
+                <div class="field">
+                  <label for="cfgRetries">最大重传次数</label>
+                  <input id="cfgRetries" type="number" min="1" max="30" required>
+                  <p class="help">传输失败前的重传测试次数（1–30 次）</p>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="cfgGrace">末块宽限时间（秒）</label>
+                  <input id="cfgGrace" type="number" min="0" max="60" required>
+                  <p class="help">上传结束后保留会话响应末块重发的时间（0–60 秒）</p>
+                </div>
+                <div class="field">
+                  <label for="cfgMax">最高并发传输</label>
+                  <input id="cfgMax" type="number" min="1" max="512" required>
+                  <p class="help">同时进行的传输任务数上限（1–512）</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card group">
+              <h3>文件策略</h3>
+              <label class="check">
+                <input type="checkbox" id="cfgOverwrite">
+                <span class="check-ui" aria-hidden="true"></span>
+                <span>允许覆盖同名文件</span>
+              </label>
+              <p class="help">关闭后，上传已存在的同名文件将返回“文件已经存在”错误</p>
+            </div>
+
+            <div class="save-bar">
+              <span id="setMsg" aria-live="polite"></span>
+              <button type="submit" class="btn primary" id="btnSave">保存设置</button>
+            </div>
+          </form>
+
+          <div class="card group advanced">
+            <details class="adv">
+              <summary>
+                高级信息
+                <span class="adv-hint">协议说明与版本</span>
+              </summary>
+              <div class="adv-body">
+                <div class="kv"><span>程序版本</span><b id="advVersion">—</b></div>
+                <div class="kv"><span>协议实现</span><b>RFC 1350，支持 octet 与 netascii</b></div>
+                <div class="kv"><span>数据块大小</span><b>512 字节</b></div>
+                <div class="kv"><span>块号规则</span><b>16位，支持块号回滚</b></div>
+                <div class="kv"><span>会话机制</span><b>支持多线程，独立 UDP 端口</b></div>
+                <div class="kv"><span>日志文件</span><b>tftp.log，按天轮转并至多保留 14 天</b></div>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- ======================= 详情抽屉 ======================= -->
+<div class="drawer-mask hidden" id="drawerMask"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="详情" hidden>
+  <div class="drawer-head">
+    <div class="drawer-title" id="drawerTitle"></div>
+    <button class="icon-btn" id="drawerClose" aria-label="关闭详情">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<!-- ======================= 确认对话框 ======================= -->
+<div class="modal-mask hidden" id="confirmMask">
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmDesc">
+    <h3 id="confirmTitle">确认操作</h3>
+    <p id="confirmDesc"></p>
+    <p class="modal-warn hidden" id="confirmWarn"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="confirmCancel">取消</button>
+      <button class="btn danger" id="confirmOk">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= 目录选择弹窗 ======================= -->
+<div class="modal-mask hidden" id="dirMask">
+  <div class="modal dir-picker" role="dialog" aria-modal="true" aria-label="选择根目录">
+    <h3>选择根目录</h3>
+    <div class="dir-crumbs" id="dirCrumbs"></div>
+    <div class="dir-list" id="dirList" tabindex="0" aria-label="目录列表"></div>
+    <p class="dir-current mono" id="dirCurrent" title=""></p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="dirCancel">取消</button>
+      <button class="btn primary" id="dirOk">选择此目录</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

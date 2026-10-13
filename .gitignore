@@ -1,0 +1,20 @@
+# ===== 课程资料 / 第三方工具（不纳入版本管理）=====
+2026秋-计算机通信与网络实验资料 (1)/
+clumsy/
+d组/检查单_converted.docx
+
+# ===== 测试数据与运行期产物 =====
+d1.bin
+客户端测试目录/
+tftp-server/tftp-server/files/*
+!tftp-server/tftp-server/files/说明-把待下载文件放到这里.txt
+tftp-server/tftp-server/logs/
+
+# ===== 日志与临时输出 =====
+*.log
+*.err
+
+# ===== Python / IDE =====
+__pycache__/
+*.pyc
+.idea/

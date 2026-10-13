@@ -1,0 +1,107 @@
+========== 官方检查单全文 ==========
+2026秋《套接字编程实验》检查单
+--- 检查单表格1 (2x6) ---
+班级 |  | 学号 |  | 姓名 | 
+检查时间 |  | 评分 |  | 评分人 | 
+--- 检查单表格2 (13x6) ---
+序号 | 检查功能点 | 分值 | 完成分 | 检查人 | 备注
+1 | 正常上传文件 | 20 |  |  | 
+2 | 正常下载文件 | 20 |  |  | 
+3 | 异常环境可靠传输 | 25 |  |  | 
+4 | 显示上传/下载吞吐量 | 10 |  |  | 
+5 | 传输结果显示/失败原因 | 10 |  |  | 
+6 | 记录日志 | 10 |  |  | 
+7 | 界面友好 | 5 |  |  | 
+以下为选做部分，酌情加分： | 以下为选做部分，酌情加分： | 以下为选做部分，酌情加分： | 以下为选做部分，酌情加分： | 以下为选做部分，酌情加分： | 以下为选做部分，酌情加分：
+1 | 图形界面 |  |  |  | 
+2 | 支持多线程并发 |  |  |  | 
+ |  |  |  |  | 
+检查详情记录： | 检查详情记录： | 检查详情记录： | 检查详情记录： | 检查详情记录： | 检查详情记录：
+
+
+========== 实验报告（计网实验报告.docx）测试与分析章节 ==========
+[Heading 1] 测试与分析
+[Heading 2] 系统测试及结果说明
+[Normal Indent] 测试环境
+[Normal Indent] 测试本TFTP服务器程序时搭建的测试环境如表3-1所示。
+[Normal Indent] 表3-1 测试环境
+[Normal Indent] 测试案例与分析
+[Normal Indent] netascii模式文件下载
+[Normal Indent] 将测试文本文件test.txt置于TFTP服务器根目录下，在本机Windows命令行TFTP客户端中使用本机回环地址执行GET命令获取该文件，具体配置如图3-1所示。
+[Normal Indent] 图3-1 本机回环使用netascii模式测试文件下载
+[Normal Indent] 执行命令后，如图3-2所示，TFTP服务器控制台显示收到了来自本机TFTP客户端的netascii模式RRQ请求，并已将其转发至TFTPSession的download()方法执行下载逻辑。
+[Normal Indent] 图3-2 服务器收到netascii模式的RRQ请求
+[Normal Indent] 下载完成后，如图3-3所示，TFTP服务器显示了传输结果并计算了吞吐量；同时检查TFTP客户端接收到的位于D:\目录下的test.txt，如图3-4所示，确认文本文件已正常完成下载。
+[Normal Indent] 图3-3 服务器显示下载完成并计算吞吐量
+[Normal Indent] 图3-4 客户端收到的test.txt
+[Normal Indent] 由此可判断，服务器主程序能正确地向TFTPSession转发RRQ请求，同时TFTPSession的main()入口能正确调用packet_process模块解析RRQ包，选择正确的netascii模式读取文件，并通过会话专用Socket分块发送给客户端。
+[Normal Indent] octet模式文件上传
+[Normal Indent] 从位于服务器所在局域网的另一主机（10.21.63.254）使用标准TFTP客户端tftpd64向服务器发送二进制图片文件test01.jpg，具体配置如图3-5所示。
+[Normal Indent] 图3-5 局域网主机使用octet模式测试文件上传
+[Normal Indent] 如图3-6所示，TFTP服务器控制台显示收到了来自局域网主机TFTP客户端的octet模式WRQ请求，并已将其转发至TFTPSession的upload()方法执行上传逻辑。
+[Normal Indent] 图3-6 服务器收到octet模式的WRQ请求
+[Normal Indent] 上传完成后，如图3-7所示，TFTP服务器显示了传输结果并计算了吞吐量；同时检查服务器接收到的位于程序根目录下的test01.jpg，如图3-8所示，确认二进制文件已正常完成上传。
+[Normal Indent] 图3-7 服务器显示上传完成并计算吞吐量
+[Normal Indent] 图3-8 服务器收到的test01.jpg
+[Normal Indent] 由此可判断，服务器主程序能正确地向TFTPSession转发WRQ请求，同时TFTPSession的main()入口能正确调用packet_process模块解析WRQ包，选择正确的octet模式写入文件，并通过会话专用Socket分块接收客户端发来的数据。
+[Normal Indent] 下载时文件不存在
+[Normal Indent] 如图3-9所示，使用本机回环向TFTP服务器请求不存在的test2.txt文件。
+[Normal Indent] 图3-9 本机回环测试下载不存在的文件
+[Normal Indent] 执行GET命令后，如图3-10和3-11所示，服务器收到TFTP客户端的RRQ请求，在TFTPSession的download()方法中执行文件存在性检查，发现文件不存在后，将包含1号错误码的ERROR包发送至客户端。
+[Normal Indent] 图3-10 服务器执行存在性检查后发送ERROR包
+[Normal Indent] 图3-11 客户端收到包含1号错误码的ERROR包
+[Normal Indent] clumsy模拟链路丢包
+[Normal Indent] 启动clumsy工具，通过本机回环模拟网络拥塞时的丢包、时延和重复数据包，以评测服务器可靠数据传输的实现情况。具体配置如图3-12所示。
+[Normal Indent] 图3-12 使用clumsy模拟丢包、时延和重复
+[Normal Indent] 随后在TFTP客户端中执行PUT命令向服务器上传test.zip。下载过程中的服务器控制台状态如图3-13所示。由此可见，服务器能够有效处理传输过程中的重复包和超时事件，通过重传机制确保各数据块按序到达，实现了可靠的数据传输。
+[Normal Indent] 图3-13 服务器通过重传机制处理传输中的丢包和超时
+[Normal Indent] 多线程并发连接
+[Normal Indent] 实现多线程并发连接是本TFTP服务器程序的一大特色，它保证了每个TFTP会话的相对独立性，同时由主服务器模块进行统一管理与维护。为测试服务器的多线程连接性能，本部分通过本机回环，同时使用标准TFTP客户端命令行和tftpd64分别向服务器请求test.jpg和test.zip，具体配置如图3-14所示。
+[Normal Indent] 图3-14 同时向服务器发送RRQ请求以测试多线程连接性能
+[Normal Indent] 如图3-15所示，执行命令后查看日志可以发现，服务器在15:40:23,064时刻收到第一个RRQ请求，随后在收到第一个RRQ请求的ACK 409时（即15:40:23,468时刻）收到第二个RRQ请求，之后能够同时维护两个不同的TFTP会话，成功实现了多线程处理。
+[Normal Indent] 图3-15 服务器同时维护两个不同的TFTP会话
+[Normal Indent] 综上所述，经过全面细致的测试分析，本服务器严格遵循了TFTP RFC规范。所有核心功能，包括文件上传与下载、netascii / octet两种传输模式、错误处理、超时重传以及多线程并发，均满足实验要求，实现了可靠的数据传输，并与标准TFTP客户端兼容良好。
+[Heading 2] 遇到的问题及解决方法
+[Normal Indent] 在服务器的开发过程中，经过详尽的学习、分析与设计，整体编程与调试较为顺利。然而，期间我遇到了一个较为棘手的问题。
+[Normal Indent] 在设计多线程逻辑时，最初我没有将每个TFTP会话线程设置为守护线程，这导致了一个严重的潜在问题：当在TFTP客户端强制中断传输（例如在tftpd64中执行break或直接通过任务管理器结束进程）时，由于TFTP会话未正常结束，且早期我设计的upload()方法未设置严格的重传机制，也未使用Python的try...except持续监测timeout事件，服务器将持续等待，使该TFTPSession会话变为无法退出的僵尸线程，最终只能通过任务管理器强制结束程序。
+[Normal Indent] 为解决此问题，我通过互联网及DeepSeek认真学习了Python threading库的使用细节，了解到session_thread.daemon = True这一关键语句。通过将每个会话线程定义为守护线程，并根据TFTP RFC规范重新优化了download()和upload()方法，确保了即使在会话出现严重错误无法恢复时，线程也能自动结束其生命周期，从而保证了服务器的稳定性。
+[Heading 2] 设计方案存在的不足与改进方案
+[Normal Indent] 本服务器主要存在以下两个设计上的不足。
+[Heading 3] 块号回滚机制
+[Normal Indent] 首先，服务器不支持传输32MB以上的大文件。经与老师交流，这最初源于TFTP RFC规范的限制（块号仅2字节，最大值为65535）。但在后续优化后的RFC规范中，新增了块号回滚机制，即块号达到65535后重新从0开始，从而突破了TFTP传输的文件大小限制。
+[Normal Indent] 在传统的TFTP客户端（如Windows命令提示符的TFTP Client）仍遵循经典TFTP RFC规范。如图3-16所示，尝试发送一个192MB的测试压缩包文件test.rar至服务器时，会提示文件无法正常读取。
+[Normal Indent] 图3-16 经典TFTP客户端不支持传输32MB以上的大文件
+[Normal Indent] 但若使用已更新回滚机制的TFTP客户端程序（如tftpd64），再将test.rar文件发送至服务器，如图3-17所示，查看日志会发现出现了严重的逻辑错误。在接收到块号为65535的DATA包后，按照代码逻辑，服务器期待接收块号为self.block_number++（即65536）的DATA包。然而，此时tftpd64已将块号回滚，从0号开始重新发送数据包，导致TFTP服务器一直认为“收到了重复的数据块”，使得传输无法继续。
+[Normal Indent] 图3-17 客户端块号回滚导致服务器持续误判为收到重复包
+[Normal Indent] 为解决此问题，只需在upload()和download()方法中重新定义块号的更新逻辑，将所有块号更新定义为模65536的运算。这样，块号形成了一个“环”，从而实现了块号回滚机制。
+[Normal] if current_packet_received:  # 当前数据包已接收
+[Normal] self.block_number = (self.block_number + 1) % 65536
+[Normal] # 更新块号，模65536的运算
+[Normal Indent] 代码更新后，重启服务器并重新发送该压缩包文件。如图3-18、3-19和3-20所示，服务器成功实现了块号回滚以支持大文件传输，并能正确计算吞吐量。
+[Normal Indent] 图3-18 更新块号回滚机制后服务器对回滚包的正确处理
+[Normal Indent] 图3-19 tftpd64成功向TFTP服务器发送192MB大文件
+[Normal Indent] 图3-20 TFTP服务器正确计算传输大文件时的吞吐量
+[Heading 3] 内存使用开销
+[Normal Indent] 当前服务器程序在download()方法中采用了一次性将整个文件读入内存的策略：
+[Normal] with open(self.filename, file_mode) as file:
+[Normal] if self.mode == 'netascii':
+[Normal] data = file.read().encode('ascii')  # 转换为netascii格式并编码为字节
+[Normal] else:
+[Normal] data = file.read()  # 直接读取二进制数据
+[Normal Indent] 此设计虽简便且能减少频繁的磁盘访问，但存在明显局限性：传输大文件时，内存开销与文件大小成正比，存在严重的性能缺陷。作为优化方向，可以避免使用read()方法一次性读取全部内容，转而采用流式读取与发送策略，即每次仅读取和传输一个不超过512字节的数据块。这将内存占用从O(n)降至O(1)，从而支持任意大小的文件传输。
+[Normal] with open(self.filename, file_mode) as file:
+[Normal] while True:
+[Normal] # 获取当前数据块
+[Normal] if self.mode == 'netascii':
+[Normal] block = file.read(512).encode('ascii')
+[Normal] # 转换为netascii格式并编码为字节
+[Normal] else:
+[Normal] block = file.read(512)  # 直接读取二进制数据
+[Normal] if not block:
+[Normal] # 发送完毕
+[Normal] break
+[Normal] current_block_size = len(block)
+[Normal] # 发送当前数据包
+[Normal Indent] 作为优化前后的对比，我们使用tftpd64客户端向TFTP服务器请求3.3.1节中使用过的192MB测试压缩包文件test.rar，并用任务管理器追踪服务器的内存使用情况，结果如图3-21和3-22所示。
+[Normal Indent] 图3-21 优化前服务器发送大文件时的内存使用开销
+[Normal Indent] 图3-22 优化后服务器发送大文件时的内存使用开销
