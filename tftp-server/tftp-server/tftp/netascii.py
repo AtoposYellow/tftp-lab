@@ -1,39 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-netascii 传输模式的流式换行转换模块
-
-RFC 1350 规定 netascii 模式下，数据必须转换为"标准 ASCII + 规定的行结束
-表示"后再传输：
-    * 行结束符表示为 CR LF（回车 + 换行）两个字节的序列；
-    * 数据中真实的 CR 字符（不作为行结束）必须表示为 CR NUL；
-    * 数据中不允许出现单独的 LF。
-
-因此发送方（服务器下载 netascii 文件时）需要把【本地文本】转换为
-【netascii 线上格式】；接收方（服务器上传 netascii 文件时）反向转换。
-本模块用两个流式转换器类实现：
-
-    NetasciiEncoder —— 本地格式 -> netascii（RRQ 下载时使用）
-        LF       -> CR LF
-        CR       -> CR NUL   （本地文件里的"裸 CR"，与行结束无关）
-        其余字节 -> 原样
-
-    NetasciiDecoder —— netascii -> 本地格式（WRQ 上传时使用）
-        CR LF    -> os.linesep（Windows 为 CR LF，macOS/Linux 为 LF）
-        CR NUL   -> CR        （还原数据中真实的 CR）
-        LF       -> os.linesep（容错：把单独的 LF 也视作行结束）
-        其余字节 -> 原样
-
-实现方式：两个转换器都是"逐字节状态机"，内部用一个挂起字节 ``_pending``
-记录含义待定的字节（CR 的含义取决于下一个字节），因此被 512 字节块边界
-截断的换行序列（例如上一块以 CR 结尾、下一块以 LF 开头）依然能被正确
-转换——这是 netascii 实现中最容易出错的细节。
-"""
-
 import os
 from abc import ABC, abstractmethod
 from typing import Optional
 
-# 本地平台的文本行结束符（Windows: b"\r\n"；macOS/Linux: b"\n"）
+# 当前操作系统惯用的文本行结束符
 LOCAL_EOL = os.linesep.encode('ascii')
 
 # ASCII 控制字符常量
@@ -42,11 +11,11 @@ _LF = 0x0A  # 换行
 _NUL = 0x00
 
 
+# 提供转换框架，管理转换状态，不能直接实例化
 class _NetasciiConverter(ABC):
     """
     流式换行转换器的公共基类。
-
-    子类只需实现 :meth:`_step`（单字节状态转移）与 :meth:`_flush_pending`
+    * 子类只需实现 :_step（单字节状态转移）与 _flush_pending
     （流结束时对挂起字节的处理），基类提供 feed()/flush() 的通用骨架。
     """
 
@@ -66,9 +35,10 @@ class _NetasciiConverter(ABC):
     def _flush_pending(self) -> bytes:
         """输入流结束时，若仍有挂起字节，返回其应输出的字节串。"""
 
+    # 程序需要记住第一块末尾的 CR，再结合第二块开头的 LF 进行判断。
     def feed(self, chunk: bytes) -> bytes:
-        """喂入一块原始字节，返回转换后的字节串（流式，可任意分块调用）。"""
-        out = bytearray()
+        """接收原始字节，返回转换后的字节串。"""
+        out = bytearray()   # 用于保存输出结果
         for byte in chunk:
             out += self._step(byte)
         return bytes(out)
@@ -81,9 +51,9 @@ class _NetasciiConverter(ABC):
         self._pending = None
         return tail
 
-
+# 本地模式 -> 网络格式
 class NetasciiEncoder(_NetasciiConverter):
-    """本地格式 -> netascii（服务器 RRQ 下载 netascii 文件时使用）。"""
+    """本地格式 -> netascii（服务器下载 netascii 文件时使用）"""
 
     def _step(self, byte: int) -> bytes:
         # 情形一：上一字节是挂起的 CR，由当前字节决定其含义
@@ -113,7 +83,7 @@ class NetasciiEncoder(_NetasciiConverter):
         # 输入以挂起的 CR 结尾：它是数据字节 -> CR NUL
         return b'\r\x00'
 
-
+# 网络格式转本地格式
 class NetasciiDecoder(_NetasciiConverter):
     """netascii -> 本地格式（服务器 WRQ 上传 netascii 文件时使用）。"""
 
