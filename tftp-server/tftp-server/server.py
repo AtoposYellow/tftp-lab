@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 """
 TFTP 服务器程序入口
-
+作为程序入口，创建各组件并启动整个项目
 启动方式（在项目根目录下执行）：
     python server.py                     # 按 config.json 启动
     python server.py --port 1069         # 临时改用 UDP 1069 端口（macOS 调试）
@@ -100,7 +99,7 @@ def main() -> int:
     args = parse_args()
     config = build_config(args)
 
-    # ---- 组装各组件（依赖注入：组件间只通过构造参数耦合）----
+    # 组装各组件
     log = EventLog(log_dir=config.log_dir, console_level=config.log_level)
     registry = TransferRegistry()
     stats = GlobalStats()
@@ -109,7 +108,7 @@ def main() -> int:
 
     print_banner(config)
 
-    # ---- 启动 TFTP 监听与 Web 界面 ----
+    # 启动 TFTP 监听与 Web 界面
     try:
         tftp.start()
     except OSError as exc:
@@ -120,7 +119,7 @@ def main() -> int:
         return 1
     web.start()
 
-    # ---- 注册信号：Ctrl+C (SIGINT) / kill (SIGTERM) 优雅停机 ----
+    # 注册信号/优雅停机
     def _handle_signal(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGINT, _handle_signal)
@@ -129,7 +128,7 @@ def main() -> int:
     except (ValueError, AttributeError):
         pass  # Windows 不支持 SIGTERM，忽略
 
-    # ---- 主线程保持存活，等待退出信号 ----
+    # 主线程保持存活，等待退出信号
     try:
         while True:
             time.sleep(1)
