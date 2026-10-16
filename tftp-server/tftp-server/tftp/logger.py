@@ -1,13 +1,10 @@
-# -*- coding: utf-8 -*-
 """
-日志模块：三路输出的统一事件日志
+三路输出的统一事件日志
 
 实验要求"能够记录日志，对于用户操作、传输成功、传输失败、超时重传等行为
 记录日志"。本模块提供 :class:`EventLog`，把日志同时写到三个目的地：
-
-    1. 彩色控制台 —— 满足"人机交互友好（命令行界面）"的基本要求；
-       Windows 下通过 ctypes 启用终端的 ANSI 转义序列（VT 模式）着色，
-       macOS / Linux 原生支持；
+    1. 彩色控制台
+       Windows 下通过 ctypes 启用终端的 ANSI 转义序列（VT 模式）着色
     2. 滚动日志文件 —— logs/tftp.log，每天 0 点轮转，保留 14 份历史；
     3. 内存环形缓冲 —— 固定容量的 deque，带自增编号，供 Web 界面
        增量拉取实时日志（/api/logs?after_id=N）。
@@ -31,14 +28,10 @@ import time
 from collections import deque
 from typing import List, Optional
 
-# ---------------------------------------------------------------------------
-# Windows 终端 ANSI 着色支持
-# ---------------------------------------------------------------------------
-
 
 def _enable_windows_ansi() -> None:
     """
-    在 Windows 控制台启用 ANSI 转义序列（ENABLE_VIRTUAL_TERMINAL_PROCESSING）。
+    在 Windows 控制台启用 ANSI 转义序列
 
     Windows 10 之前的控制台默认不解析 ANSI 颜色码，需要通过 SetConsoleMode
     打开 VT 开关；任何一步失败（旧系统 / 输出重定向）都静默降级为无色输出。
@@ -72,12 +65,9 @@ def _setup_stdout_utf8() -> None:
     except Exception:
         pass
 
-
-# ---------------------------------------------------------------------------
 # 内存环形缓冲（Web 界面实时日志的数据源）
-# ---------------------------------------------------------------------------
 
-
+# 保存最近的日志，按编号查询
 class MemoryBuffer:
     """
     线程安全的日志环形缓冲。
@@ -87,7 +77,7 @@ class MemoryBuffer:
     """
 
     def __init__(self, capacity: int = 2000):
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()              # 防止多个线程同时操作日志缓冲区
         self._buf: deque = deque(maxlen=capacity)  # 超出容量自动丢弃最旧条目
         self._next_id = 1                          # 下一条日志的编号
 
@@ -105,20 +95,19 @@ class MemoryBuffer:
             self._next_id += 1
             self._buf.append(entry)
 
+    # 增量获取日志  只获取编号大于 after_id 的新日志，并限制返回条数
     def get_after(self, after_id: int = 0, limit: int = 500) -> List[dict]:
         """取出编号大于 after_id 的日志（最多 limit 条），供 Web 增量拉取。"""
         with self._lock:
             result = [e for e in self._buf if e['id'] > after_id]
         return result[-limit:] if len(result) > limit else result
+        # 只保存最新的若干条日志
 
-
-# ---------------------------------------------------------------------------
 # 控制台彩色格式化器
-# ---------------------------------------------------------------------------
 
 
 class ColorFormatter(logging.Formatter):
-    """按日志级别给控制台输出着色的 Formatter。"""
+    """按日志级别给控制台输出着色。"""
 
     # 级别 -> ANSI 颜色代码
     COLORS = {
@@ -143,23 +132,13 @@ class ColorFormatter(logging.Formatter):
         return text
 
 
-# ---------------------------------------------------------------------------
 # 事件日志门面
-# ---------------------------------------------------------------------------
-
-
 class EventLog:
     """
-    TFTP 服务器的统一日志门面（Facade）。
+    TFTP 服务器的统一日志门面。
 
     会话层 / 服务器层 / Web 层都通过本类提供的语义化方法记录日志，
     内部同时分派到：控制台 + 文件（经由 logging.Logger）与内存环形缓冲。
-
-    用法示例::
-
-        log = EventLog(log_dir='logs')
-        log.request('RRQ', '192.168.1.5:4845', 'boot.bin', 'octet')
-        log.retransmit(3, '下载 boot.bin', 'DATA 块 5', 2)
     """
 
     # 语义化方法名 -> (logging 级别, Web 端事件类型)
@@ -189,7 +168,7 @@ class EventLog:
         self._logger.handlers.clear()   # 避免重复初始化时叠加 handler
         self._logger.propagate = False  # 不向 root logger 传播，避免重复输出
 
-        # ---- 输出 1：彩色控制台 ----
+        # 输出 1：彩色控制台
         if console_enabled:
             console = logging.StreamHandler(sys.stdout)
             console.setLevel(getattr(logging, console_level.upper(), logging.INFO))
@@ -197,7 +176,7 @@ class EventLog:
                 '%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S'))
             self._logger.addHandler(console)
 
-        # ---- 输出 2：按天滚动的日志文件 ----
+        # 输出 2：按天滚动的日志文件
         os.makedirs(log_dir, exist_ok=True)
         file_path = os.path.join(log_dir, 'tftp.log')
         file_handler = logging.handlers.TimedRotatingFileHandler(
@@ -207,11 +186,9 @@ class EventLog:
             '%(asctime)s [%(levelname)s] %(message)s'))
         self._logger.addHandler(file_handler)
 
-    # ------------------------------------------------------------------
     # 语义化日志方法
-    # ------------------------------------------------------------------
     def _emit(self, method: str, message: str) -> None:
-        """核心分派：把一条语义化事件同时写到 logging 三路与内存缓冲。"""
+        """把一条语义化事件同时写到 logging 三路与内存缓冲。"""
         level, event = self._EVENTS[method]
         self._logger.log(level, message)
         if event != 'http':
@@ -270,9 +247,7 @@ class EventLog:
         """记录 Web 访问日志（不显示在网页业务日志面板）。"""
         self._emit('http', message)
 
-    # ------------------------------------------------------------------
     # 工具方法
-    # ------------------------------------------------------------------
     @staticmethod
     def fmt_speed(bytes_per_second: float) -> str:
         """把字节/秒格式化为人类可读的速率字符串。"""
