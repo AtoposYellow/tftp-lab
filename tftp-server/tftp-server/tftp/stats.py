@@ -1,15 +1,11 @@
-# -*- coding: utf-8 -*-
 """
-吞吐量测量与全局统计模块
-
-实验要求"能够显示文件上传与下载的吞吐量"。本模块提供两个类：
-
+吞吐量统计、传输速度计算和服务器整体统计
     ThroughputMeter —— 单次传输的吞吐量测量
         * add(n)：每传输 n 个字节调用一次；
         * instant()：滑动窗口（约 1 秒）内的瞬时速率；
         * avg()：从开始到现在的平均速率（总字节 / 总耗时）。
 
-    GlobalStats —— 服务器全局统计（线程安全）
+    GlobalStats —— 服务器全局统计
         * 累计传输次数 / 成功数 / 失败数；
         * 累计传输字节数 / 累计重传次数；
         * 峰值并发传输数。
@@ -27,7 +23,7 @@ WINDOW_SECONDS = 1.0
 
 class ThroughputMeter:
     """
-    单次传输的吞吐量测量器。
+    计算单次传输的吞吐量测量
 
     实现原理：维护一个 (时间戳, 累计字节) 的采样队列，
     瞬时速率 = （当前累计字节 - 窗口起点累计字节）/（当前时间 - 窗口起点时间），
@@ -36,18 +32,19 @@ class ThroughputMeter:
 
     def __init__(self) -> None:
         self.start_time = time.time()   # 传输开始时刻
-        self.end_time: Optional[float] = None  # 冻结的计时终点（实际传输结束时刻）
+        self.end_time: Optional[float] = None  # 实际传输结束时间，初始为none
         self.total_bytes = 0            # 累计传输字节数
         # 采样队列：(时间戳, 该时刻的累计字节数)
         self._samples: deque = deque()
         self._samples.append((self.start_time, 0))
 
     def add(self, num_bytes: int) -> None:
-        """记录本次新传输的字节数（每收到/发出一个 DATA 块调用一次）。"""
+        """记录本次新传输的字节数"""
+        # 将本次传输的字节数累加到 total_bytes
         self.total_bytes += num_bytes
+        # 记录当前时间与累计字节数，放入 _samples
         now = time.time()
         self._samples.append((now, self.total_bytes))
-        # 丢弃窗口之外的旧采样（保留至少 1 个作为窗口起点）
         while len(self._samples) > 2 and now - self._samples[0][0] > WINDOW_SECONDS:
             self._samples.popleft()
 
@@ -55,7 +52,7 @@ class ThroughputMeter:
         """瞬时吞吐量（字节/秒）：最近一个滑动窗口内的平均速率。"""
         if len(self._samples) < 2:
             return 0.0
-        (t0, b0), (t1, b1) = self._samples[0], self._samples[-1]
+        (t0, b0), (t1, b1) = self._samples[0], self._samples[-1]  # 0表示其为这段时间里最早的样本，-1为最新的样本（倒数第一个）
         elapsed = t1 - t0
         if elapsed <= 0:
             return 0.0
@@ -63,10 +60,9 @@ class ThroughputMeter:
 
     def freeze(self) -> None:
         """
-        冻结计时终点：最后一个 DATA 块被确认时调用。
-
-        此后 avg() 以冻结时刻为终点——服务器收尾工作（如 WRQ 的末块
-        确认宽限期）只是协议层面的善后等待，不应计入传输耗时与平均速率，
+        传输结束时间：最后一个 DATA 块被确认时调用
+        服务器收尾工作（如 WRQ 的末块确认宽限期）只是协议层面的善后等待，
+        不应计入传输耗时与平均速率，
         否则 Web 界面显示的耗时会比客户端实际测得的时间长。
         """
         if self.end_time is None:
@@ -83,7 +79,8 @@ class ThroughputMeter:
 
 class GlobalStats:
     """
-    服务器全局统计计数器（线程安全）。
+    服务器全局统计计数器
+    累计计数器
 
     各计数器由会话线程 / 监听线程在不同时刻更新，
     用一把锁保护全部自增操作，读取通过 snapshot() 拿一致性快照。
@@ -99,9 +96,7 @@ class GlobalStats:
         self._peak_concurrent = 0      # 峰值并发传输数
         self._started_at = time.time() # 服务器启动时刻（计算运行时长）
 
-    # ------------------------------------------------------------------
     # 更新接口（会话线程 / 服务器线程调用）
-    # ------------------------------------------------------------------
     def on_transfer_start(self) -> None:
         """会话启动：累计次数 +1。"""
         with self._lock:
@@ -130,11 +125,9 @@ class GlobalStats:
             if current_active > self._peak_concurrent:
                 self._peak_concurrent = current_active
 
-    # ------------------------------------------------------------------
     # 读取接口
-    # ------------------------------------------------------------------
     def snapshot(self) -> dict:
-        """返回全部统计的一致性快照（Web 界面统计卡片）。"""
+        """返回全部统计的一致性快照（Web 界面统计）。"""
         with self._lock:
             return {
                 'transfers_total': self._transfers_total,
