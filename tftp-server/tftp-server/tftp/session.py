@@ -1,8 +1,5 @@
-# -*- coding: utf-8 -*-
 """
-传输会话模块：单次文件传输的状态机（一线程、一 UDP Socket、一 TID）
-
-实验手册 2.3 节给出的会话模型（本模块的对应实现）：
+会话模型：
     * 客户端向服务器 69 端口发 RRQ/WRQ 发起一次传输；
     * 服务器为每个请求创建一个新的 UDP Socket（绑定临时端口），该端口即
       本次传输的 TID（Transfer ID），后续所有报文都只在这对 TID 之间往来；
@@ -11,23 +8,23 @@
     * RRQ：服务器从会话 Socket 直接发送 DATA(1)，客户端逐块 ACK，
       发出 < 512 字节的 DATA 且被 ACK 后传输结束。
 
-可靠传输机制（对应验收的"异常环境可靠传输"25 分项）：
+可靠传输机制：
     * 超时重传：等待对端报文超时后重发本端最后一个报文，
       连续重传 cfg.retries 次仍失败则终止会话并记录失败原因；
-    * 重复报文处理（丢包导致 ACK/DATA 丢失时的自愈）：
+    * 重复报文处理：
       - 收到重复 DATA（块号 = 上一已确认块）→ 说明我方 ACK 丢失，补发 ACK，
         不重复写入文件；
       - 收到重复 ACK（块号 = 上一已发送 DATA）→ 说明我方 DATA 丢失，立即重发；
     * 末块宽限：WRQ 发送最终 ACK 后保持会话数秒，若再次收到末块 DATA
-      （说明最终 ACK 丢失）则补发 ACK（手册 2.3 节明确要求）。
+    则说明最终 ACK 丢失，补发 ACK。
 
-大文件支持（块号回绕）：
+大文件支持（块号回滚）：
     协议块号只有 16 位（0~65535）。本模块内部使用无界整数 seq 递增计数，
     线上报文块号取 seq & 0xFFFF；"新块 / 重复块"的判定都用回绕后的值比较，
-    因此 65535 -> 0 回绕后状态机依然正确，文件大小不受 32 MiB 限制。
+    因此 65535 -> 0 回绕后状态机依然正确，文件大小不受 32 MB 限制。
 
 线程模型：TransferSession 继承 threading.Thread，服务器为每个合法请求
-创建一个会话对象并 start()，即"每个客户请求启动一个线程"（选做要求）。
+创建一个会话对象并 start()，即每个客户请求创建一个线程。
 """
 
 import hashlib
@@ -44,17 +41,13 @@ from tftp.packets import (BLOCK_SIZE, AckPacket, DataPacket, ErrorPacket,
 from tftp.registry import DIR_DOWNLOAD, DIR_UPLOAD, STATE_FAILED, STATE_SUCCESS
 from tftp.stats import ThroughputMeter
 
-# 会话接收缓冲区大小：合法报文最长 516 字节，取余量以发现/丢弃畸形大包
+# 会话接收缓冲区大小：合法报文最长 516 字节，取余量以发现/丢弃大包
 RECV_BUFFER_SIZE = 4096
 
 
 class TransferError(Exception):
     """
-    传输过程中的可预期失败（会话层内部用于控制流的异常）。
-
-    属性说明：
-        message      —— 失败原因的中文描述（写入日志、登记表与 Web 界面）；
-        code         —— 需要发给客户端的 TFTP 错误码（0~7）；
+    传输过程中的可预期失败。
         notify_peer  —— True 时由会话向客户端发送 ERROR 报文；为 False 表示
                         失败信息已由对端告知（对端发来 ERROR）或无需告知
                         （本机停机），不再回发报文。
@@ -62,66 +55,66 @@ class TransferError(Exception):
 
     def __init__(self, message: str, code: int = 0, notify_peer: bool = True):
         super().__init__(message)
-        self.message = message
-        self.code = code
-        self.notify_peer = notify_peer
+        self.message = message  # 失败原因的中文描述
+        self.code = code   # 错误码
+        self.notify_peer = notify_peer  # 是否需要向客户端发送error报文
 
 
 class TransferSession(threading.Thread):
     """
     一次 TFTP 传输会话 = 一个线程 + 一个 UDP Socket（TID）+ 一个状态机。
-
     服务器（tftp/server.py）收到合法的 RRQ/WRQ 后构造本类对象并 start()。
-    会话的生命周期：
-
         __init__  创建会话 Socket（bind 临时端口 = TID）、登记 TransferRecord
         run       前置检查（模式/路径/文件） -> 状态机收发循环 -> 结果处理
         finally   清理：关闭文件与 Socket、从登记表移入历史、释放并发名额
     """
 
     def __init__(self, server, request: RequestPacket, client_addr: tuple):
-        # ---- 线程初始化（守护线程：主进程退出时自动结束）----
+        # 线程初始化（守护线程：主进程退出时自动结束）
+        # 初始化父类线程
         super().__init__(name=f'tftp-{client_addr[0]}:{client_addr[1]}', daemon=True)
 
-        # ---- 服务器各组件的引用（由 TFTPServer 注入）----
+        # 服务器各组件的引用（由 TFTPServer 注入）
         self.server = server
         self.cfg = server.config
         self.log = server.log
         self.registry = server.registry
         self.stats = server.stats
 
-        # ---- 会话基本信息 ----
+        # 会话基本信息
         self.request = request
         self.client_addr = client_addr                 # (IP, 端口) 二元组
         self.client = f'{client_addr[0]}:{client_addr[1]}'
         self.is_read = request.opcode == OP_RRQ        # True=RRQ下载 False=WRQ上传
         self.direction = DIR_DOWNLOAD if self.is_read else DIR_UPLOAD
-        self.use_netascii = request.mode == MODE_NETASCII
+        self.use_netascii = request.mode == MODE_NETASCII    # 是否需要用netascii中的转换器
 
-        # ---- 传输过程中的可变状态 ----
+        # 传输过程中的可变状态
         self.md5 = hashlib.md5()                       # 本地文件内容的 MD5
         self.file: Optional[object] = None             # 打开的本地文件句柄
         self.path: Optional[Path] = None               # 本地文件的完整路径
         self.meter = ThroughputMeter()                 # 吞吐量测量器
         self._sock_closed = False                      # Socket 是否已关闭
 
-        # ---- 会话 UDP Socket：绑定系统分配的临时端口，即本会话的 TID ----
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # UDP Socket：绑定系统分配的临时端口，即本会话的 TID
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  # 创建 UDP Socket
+        # AF_INET: IPv4地址    SOCK_DGRAM: 数据报Socket
         self.sock.bind(('', 0))
-        self.tid = self.sock.getsockname()[1]          # 本端的 TID（端口号）
-        self.sock.settimeout(self.cfg.timeout)         # 收包超时 -> 驱动重传
+        self.tid = self.sock.getsockname()[1]          # 本端的 TID（端口号），索引[1]获取端口号
+        self.sock.settimeout(self.cfg.timeout)         # 设置接收超时
 
-        # ---- 在登记表中注册（Web 界面立即能看到这条传输）----
+        # 创建登记记录（Web 界面立即能看到这条传输）
         self.record = self.registry.create(
             self.client, self.direction, request.filename, request.mode)
 
-    # ==================================================================
     # 线程入口与总体流程
-    # ==================================================================
+    # run的执行流程：session.start()-> _precheck() -> 判断 self.is_read -> _run_read()
+    #                                                               -> _run_write()  -> 成功/失败处理 -> finally -> cleanup()
     def run(self) -> None:
         """线程入口：前置检查 -> 状态机 -> 结果登记（异常统一收口）。"""
         self.stats.on_transfer_start()
         self.stats.update_concurrency(self.registry.active_count())
+        # 检查 - 执行 - 处理结果 - 清理
         try:
             self._precheck()                       # 模式 / 路径 / 文件检查
             if self.is_read:
@@ -132,12 +125,12 @@ class TransferSession(threading.Thread):
         except TransferError as exc:
             self._finish_failure(exc)              # 可预期失败 -> 失败登记
         except socket.timeout:
-            # 防御：正常情况下超时都在内层循环处理，这里兜底防漏网
+            # 防御：正常情况下超时都在内层循环处理，这里负责兜底
             self._finish_failure(TransferError('连接超时', notify_peer=False))
         except ConnectionError as exc:
-            # 对端连接中断（典型：客户端重传预算耗尽先退出并关闭端口，服务器
-            # 后续收发立刻收到 WinError 10054 连接重置反馈）。属于网络中断而
-            # 非磁盘/文件问题；对端已不可达，无需回送 ERROR。
+            # 对端连接中断（客户端重传预算耗尽先退出并关闭端口，服务器
+            # 后续收发立刻收到 WinError 10054 连接重置反馈），属于网络中断；
+            # 对端已不可达，无需回送 ERROR。
             self._finish_failure(TransferError(
                 f'客户端中断/连接被重置: {exc}', code=0, notify_peer=False))
         except OSError as exc:
@@ -148,7 +141,7 @@ class TransferSession(threading.Thread):
             else:
                 errno_val = getattr(exc, 'errno', 0) or 0
                 if 10000 <= errno_val < 20000:
-                    # 其余 WinSock 网络层错误（网络不可达/被拦截等），也不是磁盘问题
+                    # 其余 WinSock 网络层错误（网络不可达/被拦截等）】
                     self._finish_failure(TransferError(
                         f'网络错误: {exc}', code=0, notify_peer=False))
                 else:
@@ -163,15 +156,12 @@ class TransferSession(threading.Thread):
         finally:
             self._cleanup()
 
-    # ==================================================================
     # 前置检查：传输模式、路径安全、文件存在性 / 覆盖策略
-    # ==================================================================
     def _precheck(self) -> None:
         """
         会话开始前的静态检查，任何一项不通过都以对应错误码终止会话
-        （ERROR 报文从本会话的 TID 发出，符合主流 TFTP 服务器行为）。
         """
-        # 1. 传输模式：只支持 netascii / octet（mail 等已废弃模式拒绝）
+        # 1. 传输模式：只支持 netascii / octet
         if self.request.mode not in VALID_MODES:
             raise TransferError(
                 f'不支持的传输模式 "{self.request.mode}"', code=4)
@@ -200,62 +190,66 @@ class TransferSession(threading.Thread):
             except FileExistsError:
                 raise TransferError('文件已经存在 (File already exists)', code=6)
 
-    # ==================================================================
-    # RRQ 状态机：服务器发送文件（下载）
-    # ==================================================================
+    # RRQ 状态机：下载
     def _run_read(self) -> None:
         """
         下载状态机：读本地文件 -> 组块 -> 发 DATA -> 等 ACK -> 下一块。
-
-        与 WRQ 不同，RRQ 没有 ACK(0)：服务器直接从 DATA 块 1 开始。
+        RRQ 没有 ACK(0)：服务器直接从 DATA 块 1 开始。
         传输结束判据：发出的 DATA 载荷 < 512 字节且被确认。
         """
         f = self.file
         encoder = NetasciiEncoder() if self.use_netascii else None
-        outbuf = bytearray()   # netascii 转换后的输出缓冲（转换会改变字节数）
+        outbuf = bytearray()   # netascii 转换后的输出缓冲（转换会改变字节数），用来保存还未发送的数据
         eof = False            # 本地文件是否已读尽
         seq = 1                # 无界块计数器（线上块号 = seq & 0xFFFF）
 
         while True:
             self._check_stopping()
 
-            # ---- 第 1 步：组装下一个 DATA 载荷（不足 512 字节时继续读文件）----
+            # 第 1 步：组装下一个 DATA 载荷（不足 512 字节时继续读文件）、
             while len(outbuf) < BLOCK_SIZE and not eof:
+                # 读取文件并准备数据
                 raw = f.read(BLOCK_SIZE)
                 if raw:
-                    # MD5 按本地文件原始内容计算（净荷与客户端下载结果一致）
+                    # MD5 按本地文件原始内容计算
                     self.md5.update(raw)
                     # netascii 模式先转换；octet 模式原样
                     outbuf += encoder.feed(raw) if encoder else raw
                 if not raw or len(raw) < BLOCK_SIZE:
-                    # 文件读尽：netascii 需 flush 残留的挂起字节（如结尾 CR）
+                    # 文件读尽：netascii 需 flush 残留的挂起字节
                     if encoder:
                         outbuf += encoder.flush()
                     eof = True
 
-            # ---- 第 2 步：切出至多 512 字节作为本块载荷 ----
+            # 第 2 步：切出至多 512 字节作为本块载荷
+            # 从缓冲区取出一块待发送的数据，再从缓冲区删除已取出的部分
             payload = bytes(outbuf[:BLOCK_SIZE])
             del outbuf[:BLOCK_SIZE]
-            # 结束判据：文件已读尽且缓冲已排空（本块即最后一块）
-            is_last = eof and not outbuf
+            # 结束判据：文件已读尽、缓冲已排空、且本块载荷不足 512 字节。
+            # RFC 1350 以"DATA 载荷 < 512 字节"作为传输结束标志，因此即使
+            # 数据（netascii 转换后）恰好填满第 N 块，也必须再补发一个
+            # 载荷为空的 DATA 块 N+1，否则客户端会一直等待下一块直至超时。
+            is_last = eof and not outbuf and len(payload) < BLOCK_SIZE
 
-            # ---- 第 3 步：发送本块并等待确认（内含超时重传/重复 ACK 处理）----
+            # 第 3 步：发送本块并等待确认（内含超时重传/重复 ACK 处理）
+            # 封装DATA并等待ACK                       # 实现块号回滚
             self._send_data_wait_ack(DataPacket(seq & 0xFFFF, payload), seq)
 
-            # ---- 第 4 步：进度与吞吐量统计 ----
+            # 第 4 步：进度与吞吐量统计
             self.meter.add(len(payload))
             self._update_progress(seq, len(payload))
 
             if is_last:
                 self._mark_transfer_done()   # 冻结耗时统计（最后一个块已被确认）
                 return
+            # 更新进度，决定是否继续
             seq += 1  # 无界递增；线上块号在 65535 后自然回绕为 0
-
+    # 下载重传算法
     def _send_data_wait_ack(self, pkt: DataPacket, seq: int) -> None:
         """
-        发送一个 DATA 并阻塞等待其 ACK（锁步协议的核心）。
+        发送一个 DATA 并阻塞等待其 ACK。
 
-        处理三种情况（详见模块 docstring 的可靠传输机制）：
+        处理三种情况：
             * ACK 块号 == 本块       -> 确认成功，返回；
             * ACK 块号 == 上一块     -> 重复 ACK：我方 DATA 可能丢失，立即重发；
             * 等待超时               -> 重发本块，超过 retries 次终止。
@@ -267,7 +261,7 @@ class TransferSession(threading.Thread):
             try:
                 rx = self._recv()
             except socket.timeout:
-                # 超时：重传本块（RFC 1350：只在超时后重传）
+                # 超时：重传本块（只在超时后重传）
                 attempts += 1
                 self._note_retransmit(f'等待 ACK(块{pkt.block}) 超时，重发 DATA',
                                       attempt=attempts)
@@ -275,7 +269,7 @@ class TransferSession(threading.Thread):
                     raise TransferError(
                         f'重传 {self.cfg.retries} 次后仍未收到 ACK，放弃传输')
                 continue
-
+            # 用于判断 rx 对象是否属于 AckPacket 类或子类
             if isinstance(rx, AckPacket):
                 if rx.block == pkt.block:
                     return  # 正确确认 -> 状态推进
@@ -300,30 +294,30 @@ class TransferSession(threading.Thread):
                 self.log.debug(f'[传输#{self.record.tid}] '
                                f'等待 ACK 时收到意外报文 {type(rx).__name__}，忽略')
 
-    # ==================================================================
-    # WRQ 状态机：服务器接收文件（上传）
-    # ==================================================================
+    # WRQ 状态机：上传
     def _run_write(self) -> None:
         """
         上传状态机：ACK(0) -> 收 DATA 写盘 -> ACK -> ... -> 末块 < 512。
 
-        结束后的"末块宽限"见 _grace()：最终 ACK 可能丢失，需在数秒内
-        继续响应客户端重发的末块 DATA。
+        _grace()：末块宽限，最终 ACK 可能丢失，需在数秒内继续响应客户端重发的末块 DATA。
         """
         f = self.file
         decoder = NetasciiDecoder() if self.use_netascii else None
         self._send(AckPacket(0))   # 对 WRQ 本身的确认：块号为 0
-
-        seq = 1          # 期望接收的下一个块号（无界计数；线上 = seq & 0xFFFF）
-        last_acked = 0   # 最近一次已确认的块号（无界计数）
+        # 告诉客户端，服务器已经接受上传请求，可以开始发送第一块数据
+        # 初始化上传状态
+        seq = 1          # 期望接收的下一个块号（ seq & 0xFFFF）
+        last_acked = 0   # 最近一次已确认的块号
         attempts = 0     # 连续超时次数
         dup_block = None  # 最近一次连续重复的 DATA 块号
-        dup_count = 0    # 该块连续重复次数（当前块的重传计数）
+        dup_count = 0    # 当前块的重传计数
 
+        # 正常接收到DATA时
         while True:
             self._check_stopping()
             try:
                 rx = self._recv()
+            # 发生超时时，重传 ACK
             except socket.timeout:
                 # 等待数据超时：重发上一个 ACK（RFC 1350：S 等待的新 DATA
                 # 是对上一 ACK 的确认；客户端收不到 ACK 会重发 DATA）
@@ -339,8 +333,10 @@ class TransferSession(threading.Thread):
 
             attempts = 0  # 收到任何合法报文都重置连续超时计数
 
+
+            # 正常接收到DATA时
             if isinstance(rx, DataPacket):
-                if rx.block == seq & 0xFFFF:
+                if rx.block == seq & 0xFFFF:    # DATA块号符合当前期望值
                     # ---- 新数据块：写入文件并确认 ----
                     written = self._write_payload(rx.data, decoder)
                     self.md5.update(written)
@@ -360,17 +356,20 @@ class TransferSession(threading.Thread):
                                 f.write(tail)
                                 self.md5.update(tail)
                         f.flush()
+                        # 收到一个完整的非末块数据后，服务器发送对应的ACK
                         self._send(AckPacket(last_acked & 0xFFFF))
                         # 实际传输到此结束：先冻结耗时统计，再进入末块确认
                         # 宽限期——宽限等待只服务于"最终 ACK 丢失"的善后，
                         # 不应计入传输耗时与平均速率（否则 Web 显示的耗时会
-                        # 比客户端实际测得的时间多出 grace_seconds）。
+                        # 比客户端实际测得的时间多出 grace_seconds
                         self._mark_transfer_done()
+                        # 在一段宽限时间内继续监听重复末块DATA，并重新发送ACK，不再写入数据
                         self._grace(last_acked & 0xFFFF)
                         return
                     # 非末块：确认后继续等待下一块（每个 DATA 恰好一个 ACK）
                     self._send(AckPacket(last_acked & 0xFFFF))
-                elif rx.block == last_acked & 0xFFFF:
+                # 处理重复 ACK
+                elif rx.block == last_acked & 0xFFFF:   # 表示当前收到的块号等于上一块已经确认的块号
                     # ---- 重复 DATA：我方上一 ACK 丢失 -> 补 ACK，不重复写 ----
                     if rx.block == dup_block:
                         dup_count += 1
@@ -380,6 +379,7 @@ class TransferSession(threading.Thread):
                         f'收到重复 DATA 块{rx.block}，补发 ACK(块{last_acked & 0xFFFF})',
                         attempt=dup_count)
                     self._send(AckPacket(last_acked & 0xFFFF))
+                    # 只补发ACK，不重复写入文件，也不重复更新解码器状态
                 else:
                     # 乱序 / 未知块号（如迟到很久的旧块）：忽略并记录
                     self.log.debug(f'[传输#{self.record.tid}] 忽略乱序 DATA 块'
@@ -396,7 +396,7 @@ class TransferSession(threading.Thread):
         把一个新 DATA 块写入本地文件。
 
         octet 模式原样写入；netascii 模式先经解码器转换为本地格式再写入。
-        返回实际写入的字节（用于 MD5 计算——MD5 对应的是本地落盘内容）。
+        返回实际写入的字节（用于 MD5 计算）。
         """
         if decoder is not None:
             decoded = decoder.feed(data)
@@ -407,7 +407,7 @@ class TransferSession(threading.Thread):
 
     def _grace(self, last_wire_block: int) -> None:
         """
-        末块确认宽限期（手册 2.3 节）。
+        末块确认宽限期、
 
         WRQ 的最后一个报文是服务器的 ACK——若它丢失，客户端会重发末块 DATA。
         因此服务器在回完最终 ACK 后不立即关闭，而是在 grace_seconds 内继续
@@ -446,11 +446,11 @@ class TransferSession(threading.Thread):
         finally:
             self.sock.settimeout(self.cfg.timeout)
 
-    # ==================================================================
     # 通用收发与统计辅助
-    # ==================================================================
+
     def _send(self, pkt: TftpPacket) -> None:
         """从会话 Socket 向客户端发送一个报文。"""
+        # 将 DataPacket、AckPacket 等对象转换为二进制报文，然后通过 Socket 发给客户端
         if self._sock_closed:
             return
         try:
@@ -461,14 +461,24 @@ class TransferSession(threading.Thread):
 
     def _recv(self) -> TftpPacket:
         """
-        从会话 Socket 接收一个【来自本会话客户端】的报文并解析。
+        接收并解析报文
 
-        校验规则（RFC 1350 的 TID 机制）：源地址/端口与请求时不符的报文
-        一律丢弃并记日志——防止其他进程/会话的报文串扰本会话。
+        校验规则：源地址/端口与请求时不符的报文
+        一律丢弃并记日志
+        -> 防止其他进程/会话的报文串扰本会话。
 
-        :raises socket.timeout: 超时未收到有效报文（由调用方触发重传逻辑）；
+        :raises socket.timeout: 超时未收到有效报文（由调用方触发重传）；
         :raises OSError: Socket 已被关闭（服务器停机）。
         """
+        # 流程如下：UDP Socket 收到 bytes
+        #           ↓
+        # 检查来源 IP 和端口
+        #           ↓
+        # PacketParser.parse(data)
+        #           ↓
+        # 生成具体报文对象
+        #           ↓
+        # 返回给状态机处理
         while True:
             data, addr = self.sock.recvfrom(RECV_BUFFER_SIZE)
             if addr != self.client_addr:
@@ -480,14 +490,14 @@ class TransferSession(threading.Thread):
             except PacketFormatError as exc:
                 # 报文格式错误只影响这一包，记录后继续等待下一包。
                 self.log.debug(f'[传输#{self.record.tid}] 丢弃畸形报文: {exc}')
-
+    # 检查服务器是否为停止状态
     def _check_stopping(self) -> None:
         """服务器正在停机时抛出终止异常（notify_peer=False：不必告知客户端）。"""
         if self.server.stopping.is_set():
             raise TransferError('服务器正在停止', notify_peer=False)
-
+   # 记录重传事件
     def _note_retransmit(self, detail: str, attempt: Optional[int] = None) -> None:
-        """统一记录一次重传/重复报文事件：登记表 + 全局统计 + 日志。
+        """登记表 + 全局统计 + 日志
 
         attempt：当前块（当前等待序列）内的第几次重传；缺省时日志回退为整场累计次数。
         """
@@ -514,9 +524,8 @@ class TransferSession(threading.Thread):
         self.meter.freeze()
         self.record.transferred_at = time.time()
 
-    # ==================================================================
     # 结果登记与资源清理
-    # ==================================================================
+
     def _finish_success(self) -> None:
         """传输成功：写登记表、全局统计、成功日志（含吞吐量与 MD5）。"""
         if self.file is not None:
@@ -543,7 +552,7 @@ class TransferSession(threading.Thread):
         self.log.failure(rec.direction_name, self.client, rec.filename, exc.message)
 
     def _cleanup(self) -> None:
-        """会话收尾：关闭文件与 Socket、移入历史、归还并发名额（幂等）。"""
+        """会话收尾：关闭文件与 Socket、移入历史、归还并发名额。"""
         if self.file is not None:
             try:
                 self.file.close()
