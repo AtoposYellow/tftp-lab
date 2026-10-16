@@ -32,11 +32,20 @@ from tftp import VERSION                              # noqa: E402
 from web.app import WebUI                             # noqa: E402
 
 # 默认配置文件路径（与 server.py 同目录）
+# CONFIG_PATH这个字符串保存着config.json的完整路径，
+# 这个路径是通过当前Python文件自己的路径通过os的path里的这些东西去拼接而成的
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
 
-
+# 一、算出config.json的完整路径
+# 二、定义用来解析命令行参数，使得用户可以在启动时临时覆盖配置文件里的设置
+# 定义一个函数         # 作为类型提示告诉别人，这个函数会返回一个argparse.Namespace对象
 def parse_args() -> argparse.Namespace:
-    """解析命令行参数：所有参数均可覆盖 config.json 中的同名配置。"""
+    """解析命令行参数：所有参数均可覆盖 config.json 中的同名配置
+    eg. 意思是：如果你在命令行里写了 --port 6969，那就会用 6969，而不是配置文件里的默认端口。。"""
+    # parser 是解析器的名字  argparse是Python自带的工具箱，用来处理命令行参数
+    # ArgumentParser是里面的一个解析器工具，parser是给解析器起的名字
+    # description = '...'  是描述，当用户输入 --help，会显示这句话
+
     parser = argparse.ArgumentParser(description='TFTP 服务器（Socket 编程实验）')
     parser.add_argument('--port', type=int, help='TFTP 监听的 UDP 端口（默认 69）')
     parser.add_argument('--web-port', type=int, help='Web 管理台 TCP 端口（默认 8080）')
@@ -45,12 +54,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--retries', type=int, help='重传次数上限（默认 6）')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                         help='控制台日志级别（默认 INFO）')
+    # 让解析器去读用户实际输入的命令行
+    # 检查输入是否合法，把结果打包成一个Namespace对象返回
     return parser.parse_args()
 
-
+                # 作为类型提示，说明args是一个argparse.Namespace
 def build_config(args: argparse.Namespace) -> ServerConfig:
-    """加载 config.json 并应用命令行覆盖项。"""
+    """先加载 config.json，再用命令行参数覆盖里面的配置。"""
+    # ServerConfig.load(...)会读取JSON文件，并生成一个ServerConfig配置对象
+    # 这个对象里面装着默认配置，比如默认端口、超时时间、重传次数等
+    # 最后把结果赋值给config
     config = ServerConfig.load(CONFIG_PATH)
+    # not none 表示非空
     if args.port is not None:
         config.tftp_port = args.port
     if args.web_port is not None:
