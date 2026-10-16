@@ -1,8 +1,4 @@
-# -*- coding: utf-8 -*-
 """
-TFTP 服务器主体模块
-
-本模块包含三个核心类：
 
     ServerConfig —— 服务器配置（dataclass），支持 JSON 持久化；
     PathGuard    —— 路径安全守卫：把客户端给出的文件名限制在服务器根目录内；
@@ -17,7 +13,7 @@ TFTP 服务器主体模块
 线程模型总览：
     主线程          —— 程序入口，负责启动/停止与信号处理；
     监听线程        —— TFTPServer._listen_loop，只做"收请求 + 派发"；
-    会话线程 x N    —— TransferSession.run，每个客户端请求一个；
+    会话线程    —— TransferSession.run，每个客户端请求一个；
     Web 服务线程    —— web/app.py 的 HTTP 服务（独立于 TFTP 监听）。
 """
 
@@ -35,43 +31,25 @@ from tftp.packets import (MAX_PACKET_SIZE, OP_RRQ, ErrorPacket,
                           PacketFormatError, PacketParser, RequestPacket)
 from tftp.session import TransferSession
 
-# ---------------------------------------------------------------------------
-# 配置
-# ---------------------------------------------------------------------------
 
-
-@dataclass
+@dataclass # 可以自动生成初始化方法
+# 配置Config
 class ServerConfig:
     """
     服务器全部可配置项（对应项目根目录 config.json）。
-
-    字段说明：
-        tftp_port      TFTP 监听的 UDP 端口（协议约定 69；macOS 调试可用 1069）
-        web_port       Web 管理界面的 HTTP 端口
-        root_dir       服务器根目录：所有上传/下载都限制在该目录内
-        log_dir        日志文件目录
-        log_level      控制台日志级别（DEBUG/INFO/WARNING/ERROR）
-        timeout        收包超时秒数（超时触发重传）
-        retries        连续重传次数上限（超过则判定传输失败）
-        max_concurrent 最大并发传输数（每请求一线程的线程数上限）
-        grace_seconds  WRQ 最终 ACK 之后的末块宽限秒数
-        overwrite      上传同名文件时是否允许覆盖（False -> ERROR 6）
     """
 
-    tftp_port: int = 69
-    web_port: int = 8080
-    root_dir: str = 'files'
-    log_dir: str = 'logs'
-    log_level: str = 'INFO'
-    timeout: float = 2.0
-    retries: int = 6
-    max_concurrent: int = 32
-    grace_seconds: int = 5
-    overwrite: bool = True
+    tftp_port: int = 69              # TFTP 监听的 UDP 端口
+    web_port: int = 8080             # Web 管理界面的 HTTP 端口
+    root_dir: str = 'files'          # 服务器根目录：所有上传/下载都限制在该目录内
+    log_dir: str = 'logs'            # 日志文件目录
+    log_level: str = 'INFO'          # 控制台日志级别
+    timeout: float = 2.0        # 收包超时秒数
+    retries: int = 6                 # 最大重传次数
+    max_concurrent: int = 32         # 最大并发传输数
+    grace_seconds: int = 5           # 末块宽限秒数（WRQ最终ACK后
+    overwrite: bool = True           # 是否覆盖同名文件
 
-    # ------------------------------------------------------------------
-    # JSON 持久化
-    # ------------------------------------------------------------------
     @classmethod
     def load(cls, path: str) -> 'ServerConfig':
         """从 JSON 文件加载配置；文件不存在或字段缺失时用默认值补齐。"""
@@ -94,23 +72,10 @@ class ServerConfig:
             json.dump(asdict(self), f, ensure_ascii=False, indent=2)
 
 
-# ---------------------------------------------------------------------------
 # 路径安全守卫
-# ---------------------------------------------------------------------------
-
-
 class PathGuard:
     """
     把客户端提供的文件名安全地解析为服务器根目录内的绝对路径。
-
-    TFTP 请求中的文件名来自网络对端，属于不可信输入。若不加限制，
-    类似 "../../etc/passwd" 的文件名会造成目录穿越（Path Traversal）。
-    本守卫按以下规则逐一拒绝非法文件名：
-        1. 空文件名 / 含 NUL 字节；
-        2. 绝对路径（以 / 或 \\ 开头）与 Windows 盘符（如 C:\\）；
-        3. 规范化后包含 ".."（跳出根目录）；
-        4. Windows 保留设备名（CON、PRN、AUX、NUL、COM1-9、LPT1-9）；
-        5. 解析出的最终路径必须仍位于根目录之内（双保险）。
     """
 
     # Windows 保留设备名（不区分大小写、可带扩展名，如 "NUL.txt"）
@@ -156,20 +121,10 @@ class PathGuard:
         return resolved
 
 
-# ---------------------------------------------------------------------------
 # 服务器主体
-# ---------------------------------------------------------------------------
-
-
 class TFTPServer:
     """
-    TFTP 服务器主体：监听线程 + 会话线程管理 + 请求去重 + 并发控制。
-
-    生命周期：
-        server = TFTPServer(config, log, registry, stats)
-        server.start()   # 绑定 UDP 端口，开始接受请求
-        ...
-        server.stop()    # 优雅停机：停止收包、关闭全部会话、等待线程退出
+    TFTP 服务器主体：监听线程 + 会话线程管理 + 请求去重 + 并发控制
     """
 
     def __init__(self, config: ServerConfig, log, registry, stats):
@@ -203,35 +158,39 @@ class TFTPServer:
         Path(config.root_dir).mkdir(parents=True, exist_ok=True)
         self.path_guard = PathGuard(config.root_dir)
 
-    # ==================================================================
     # 启动 / 停止
-    # ==================================================================
     def start(self) -> None:
         """
         启动 TFTP 服务：绑定 UDP 端口并启动监听线程。
 
         :raises OSError: 端口被占用或无权限绑定时抛出（由入口/Web 层提示）。
         """
+        # 判断监听线程是否已经运行
         if self._listen_thread is not None and self._listen_thread.is_alive():
             return  # 已在运行
-        self.stopping.clear()
+        self.stopping.clear()   # 清除停止标志
 
+        # 创建 UDP Socket
         sock = _make_udp_socket()
+        # 并绑定服务器监听端口
         sock.bind(('0.0.0.0', self.config.tftp_port))
         self._listen_sock = sock
         self._started_at = time.time()
 
+        # 创建监听线程，指定其执行_listen_loop
         self._listen_thread = threading.Thread(
             target=self._listen_loop, name='tftp-listen', daemon=True)
         self._listen_thread.start()
         self.log.system(f'TFTP 服务器已启动：UDP 端口 {self.config.tftp_port}，'
                         f'根目录 "{os.path.abspath(self.config.root_dir)}"')
 
+    # 停止服务器运行
     def stop(self) -> None:
         """
         优雅停机：先停止收新请求，再关闭所有会话线程，最后释放资源。
         （幂等：重复调用安全；Web 端的"停止服务"按钮也调用本方法。）
         """
+        # 设置 self.stopping，通知监听线程和会话线程停止
         if not self.stopping.is_set():
             self.stopping.set()
             self.log.system('TFTP 服务器正在停止……')
@@ -256,6 +215,7 @@ class TFTPServer:
             session.shutdown()
         for session in sessions:
             session.join(timeout=3.0)
+            # 表示当前线程最多等待目标线程约 3 秒结束
         self.log.system('TFTP 服务器已停止')
 
     @property
@@ -270,20 +230,16 @@ class TFTPServer:
         """本次运行时长（秒；未启动为 0）。"""
         return time.time() - self._started_at if self._started_at else 0.0
 
-    # ==================================================================
     # 监听循环：收请求 -> 去重 -> 限流 -> 派发会话线程
-    # ==================================================================
     def _listen_loop(self) -> None:
         """
         监听线程主循环（协议约定的 69 端口）。
-
-        注意职责边界：本循环只做"接收 + 解析 + 派发"，绝不在此收发
-        传输数据——传输在各自会话线程的新 TID 上进行。
-        任何单次循环内的异常都被捕获并记录，保证监听永不因个别坏包而死。
+        只负责接收和分配请求，不负责完整的文件传输
         """
+        # 在服务器运行期间不断接收客户端请求
         sock = self._listen_sock
-        while not self.stopping.is_set():
-            try:
+        while not self.stopping.is_set():  # 检查停止标志
+            try:     # 等待 UDP 请求，收到数据及客户端地址
                 data, addr = sock.recvfrom(MAX_PACKET_SIZE * 4)
             except OSError:
                 # Socket 被 stop() 关闭（或系统级错误）-> 检查标志后退出
@@ -291,22 +247,23 @@ class TFTPServer:
                     return
                 continue
 
+            # 处理请求
             try:
                 self._dispatch(data, addr)
             except Exception as exc:
                 # 单个请求的处理异常不影响监听循环
                 self.log.error(f'处理来自 {addr[0]}:{addr[1]} 的请求时出错: {exc!r}')
 
+    # 请求-分发算法
+    # 收到一个 UDP 报文后，判断是否接受请求，并为合法请求创建新的传输会话
     def _dispatch(self, data: bytes, addr: Tuple[str, int]) -> None:
         """
         处理一个到达 69 端口的数据报：解析 -> 去重 -> 限流 -> 建会话。
-
-        只有 RRQ/WRQ 请求会进入本函数的处理路径；其余报文（客户端误发
-        到 69 端口的 DATA/ACK 等）按协议记录日志后忽略。
+        只有 RRQ/WRQ 请求会进入本函数的处理路径
         """
         client = f'{addr[0]}:{addr[1]}'
 
-        # ---- 解析：非 RRQ/WRQ 或畸形包直接忽略（RFC：错误请求不必回应）----
+        # 解析：非 RRQ/WRQ 或畸形包直接忽略（错误请求不必回应）
         try:
             packet = PacketParser.parse(data)
         except PacketFormatError as exc:
@@ -319,13 +276,13 @@ class TFTPServer:
         opcode_name = 'RRQ(下载)' if packet.opcode == OP_RRQ else 'WRQ(上传)'
         self.log.request(opcode_name, client, packet.filename, packet.mode)
 
-        # ---- 请求去重：客户端超时重发的同一请求只处理一次 ----
+        # 判断重复请求
         if self._is_duplicate_request(data, addr):
             self.log.debug(f'[{client}] 识别为重发的重复请求，忽略'
                            f'（既有会话仍在处理）')
             return
-
-        # ---- 并发限制：无空闲名额则从 69 端口直接回 ERROR(0) 并拒绝 ----
+        # acquire() 表示尝试获取一个信号量名额
+        # blocking=False ：如果没有名额，不要阻塞等待，而是立即返回 False。
         if not self._slots.acquire(blocking=False):
             self.log.denied(client, f'并发传输数已达上限 {self.config.max_concurrent}')
             try:
@@ -335,22 +292,17 @@ class TFTPServer:
                 pass
             return
 
-        # ---- 创建会话（新线程 + 新 TID）并启动 ----
+        # 创建会话并启动线程
         session = TransferSession(self, packet, addr)
         with self._sessions_lock:
             self._sessions.add(session)
-        session.start()
+        session.start()    # 创建新线程，执行 run()
 
     def _is_duplicate_request(self, data: bytes, addr: Tuple[str, int]) -> bool:
         """
-        判断是否为客户端重发的重复请求。
-
+        判断是否为客户端重发的重复请求
         原理：记录每个客户端地址最近一次请求的 (报文指纹, 时间)。
         若同一地址在 TTL 窗口内发来字节完全相同的请求，视为重发。
-
-        关键细节：只有当该客户端【仍存在存活的会话】时才忽略重发——
-        若旧会话已经结束（例如其 ACK(0) 丢失后超时终止），客户端的重发
-        请求必须重新建立新会话，否则客户端会陷入"永远等不到响应"的死锁。
         """
         now = time.time()
         fingerprint = bytes(data)  # bytes 作 dict 键即天然指纹
@@ -362,8 +314,12 @@ class TFTPServer:
                 a: v for a, v in self._recent_requests.items()
                 if now - v[1] < self._DEDUP_TTL}
 
+        # 这个客户端地址之前是否有请求记录
+        # 本次请求与上次请求字节相同
+        # 两次请求间隔小于 15s
         is_dup = (last is not None and last[0] == fingerprint
                   and now - last[1] < self._DEDUP_TTL)
+        # 检查会话是否存活
         if is_dup:
             with self._sessions_lock:
                 has_live = any(s.client_addr == addr and s.is_alive()
@@ -372,19 +328,23 @@ class TFTPServer:
                 is_dup = False   # 无存活会话 -> 允许重建会话
         self._recent_requests[addr] = (fingerprint, now)
         return is_dup
+    # 第一次请求	                    创建会话
+    # 15 秒内相同请求，旧会话仍存活	    忽略重复请求
+    # 15 秒内相同请求，但旧会话已结束	允许建立新会话
+    # 超过去重时间窗口	            不因该记录被判为重复
+    # 请求字节不同	                不判为相同请求
 
-    # ==================================================================
     # 会话生命周期回调
-    # ==================================================================
+    # 并发控制
     def on_session_end(self, session: TransferSession) -> None:
         """
         会话结束回调（由 TransferSession._cleanup 调用）：
         从跟踪集合移除会话线程并归还并发名额。
         """
         with self._sessions_lock:
-            self._sessions.discard(session)
+            self._sessions.discard(session)    # 移除已完成会话
         try:
-            self._slots.release()
+            self._slots.release()              # 调用 release()归还一个并发名额
         except ValueError:
             pass  # 防御：重复释放（正常流程不会发生）
 
@@ -401,12 +361,7 @@ class TFTPServer:
         """
         self._slots = threading.BoundedSemaphore(new_limit)
 
-
-# ---------------------------------------------------------------------------
 # 工具函数
-# ---------------------------------------------------------------------------
-
-
 def _make_udp_socket():
     """创建监听用 UDP Socket，并设置地址复用（快速重启时不受 TIME_WAIT 限制）。"""
     import socket
